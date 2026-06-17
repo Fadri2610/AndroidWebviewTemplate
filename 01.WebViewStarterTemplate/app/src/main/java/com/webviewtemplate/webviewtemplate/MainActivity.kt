@@ -12,14 +12,15 @@ import android.view.View
 import android.webkit.*
 import android.window.OnBackInvokedDispatcher
 import com.webviewtemplate.webviewtemplate.databinding.ActivityMainBinding
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
 class MainActivity : Activity() {
 
     private val applicationUrl = "https://node-snapdrop.onrender.com/"
     private lateinit var binding: ActivityMainBinding
     private lateinit var webView: WebView
+    private lateinit var swipeRefreshLayout: SwipeRefreshLayout
 
-    // Required for file uploading
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private val FILE_CHOOSER_RESULT_CODE = 1
 
@@ -30,6 +31,7 @@ class MainActivity : Activity() {
         setContentView(binding.root)
 
         webView = binding.webView
+        swipeRefreshLayout = binding.swipeRefreshLayout
 
         // 1. Configure WebSettings
         webView.settings.apply {
@@ -40,14 +42,18 @@ class MainActivity : Activity() {
             allowFileAccess = true
             mediaPlaybackRequiresUserGesture = false
             setSupportZoom(false)
-            builtInZoomControls = false
-            displayZoomControls = false
         }
 
-        // 2. Setup WebViewClient (Navigation & Error Handling)
+        // Swipe to Refresh setup
+        swipeRefreshLayout.setOnRefreshListener {
+            webView.reload()
+        }
+
+        // 2. Setup WebViewClient
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                swipeRefreshLayout.isRefreshing = false
                 applyDarkMode()
                 binding.webView.visibility = View.VISIBLE
                 binding.errorLayout.visibility = View.GONE
@@ -55,66 +61,48 @@ class MainActivity : Activity() {
 
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                 super.onReceivedError(view, request, error)
+                swipeRefreshLayout.isRefreshing = false
                 binding.webView.visibility = View.GONE
                 binding.errorLayout.visibility = View.VISIBLE
             }
         }
 
-        // 3. Setup WebChromeClient (Permissions, File Chooser, Progress)
+        // 3. Setup WebChromeClient
         webView.webChromeClient = object : WebChromeClient() {
             override fun onPermissionRequest(request: PermissionRequest) {
                 request.grant(request.resources)
             }
 
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                if (newProgress < 100) {
-                    binding.progressBar.visibility = View.VISIBLE
-                    binding.progressBar.progress = newProgress
-                } else {
-                    binding.progressBar.visibility = View.GONE
-                }
+                binding.progressBar.visibility = if (newProgress < 100) View.VISIBLE else View.GONE
+                binding.progressBar.progress = newProgress
             }
 
-            override fun onShowFileChooser(
-                webView: WebView?,
-                filePathCallback: ValueCallback<Array<Uri>>?,
-                fileChooserParams: FileChooserParams?
-            ): Boolean {
+            override fun onShowFileChooser(webView: WebView?, filePathCallback: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
                 this@MainActivity.filePathCallback = filePathCallback
-                val intent = fileChooserParams?.createIntent()
-                try {
-                    startActivityForResult(intent, FILE_CHOOSER_RESULT_CODE)
-                } catch (e: Exception) {
-                    this@MainActivity.filePathCallback = null
-                    return false
-                }
+                startActivityForResult(params?.createIntent(), FILE_CHOOSER_RESULT_CODE)
                 return true
             }
         }
 
-        // 4. Back Button Support (Android 13+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) {
-                handleBackPress()
-            }
+        // 4. Load Logic (Fixes rotation reset)
+        if (savedInstanceState == null) {
+            webView.loadUrl(applicationUrl)
+        } else {
+            webView.restoreState(savedInstanceState)
         }
-
-        webView.loadUrl(applicationUrl)
     }
 
-    // Helper for Retry Button defined in activity_main.xml
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        webView.saveState(outState)
+    }
+
+    // Helper for Retry Button
     fun reloadWebView(view: View) {
         webView.reload()
         binding.errorLayout.visibility = View.GONE
         binding.webView.visibility = View.VISIBLE
-    }
-
-    private fun handleBackPress() {
-        if (webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            finish()
-        }
     }
 
     private fun applyDarkMode() {
