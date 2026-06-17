@@ -3,9 +3,12 @@ package com.webviewtemplate.webviewtemplate
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
+import android.view.View
 import android.webkit.*
 import android.window.OnBackInvokedDispatcher
 import com.webviewtemplate.webviewtemplate.databinding.ActivityMainBinding
@@ -25,18 +28,53 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
         webView = binding.webView
 
-        // 1. IMPROVEMENT: Force links to open inside the app
-        webView.webViewClient = WebViewClient()
+        // 1. Configure WebSettings
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            allowFileAccess = true
+            mediaPlaybackRequiresUserGesture = false
+            setSupportZoom(false)
+            builtInZoomControls = false
+            displayZoomControls = false
+        }
 
-        // 2. IMPROVEMENT: Set up WebChromeClient with File Chooser
+        // 2. Setup WebViewClient (Navigation & Error Handling)
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                applyDarkMode()
+                binding.webView.visibility = View.VISIBLE
+                binding.errorLayout.visibility = View.GONE
+            }
+
+            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                super.onReceivedError(view, request, error)
+                binding.webView.visibility = View.GONE
+                binding.errorLayout.visibility = View.VISIBLE
+            }
+        }
+
+        // 3. Setup WebChromeClient (Permissions, File Chooser, Progress)
         webView.webChromeClient = object : WebChromeClient() {
             override fun onPermissionRequest(request: PermissionRequest) {
                 request.grant(request.resources)
             }
 
-            // This handles the file upload button click
+            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                if (newProgress < 100) {
+                    binding.progressBar.visibility = View.VISIBLE
+                    binding.progressBar.progress = newProgress
+                } else {
+                    binding.progressBar.visibility = View.GONE
+                }
+            }
+
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
@@ -54,25 +92,38 @@ class MainActivity : Activity() {
             }
         }
 
-        // --- Your Existing Configuration ---
+        // 4. Back Button Support (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) {
-                if (webView.canGoBack()) webView.goBack() else finish()
+                handleBackPress()
             }
-        }
-
-        webView.settings.apply {
-            domStorageEnabled = true
-            javaScriptEnabled = true
-            useWideViewPort = true
-            loadWithOverviewMode = true
-            allowFileAccess = true // Recommended for file sharing apps
         }
 
         webView.loadUrl(applicationUrl)
     }
 
-    // 3. IMPROVEMENT: Handle the result of the file selection
+    // Helper for Retry Button defined in activity_main.xml
+    fun reloadWebView(view: View) {
+        webView.reload()
+        binding.errorLayout.visibility = View.GONE
+        binding.webView.visibility = View.VISIBLE
+    }
+
+    private fun handleBackPress() {
+        if (webView.canGoBack()) {
+            webView.goBack()
+        } else {
+            finish()
+        }
+    }
+
+    private fun applyDarkMode() {
+        val isDarkMode = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        if (isDarkMode) {
+            webView.evaluateJavascript("document.body.classList.add('dark');", null)
+        }
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == FILE_CHOOSER_RESULT_CODE) {
             val result = if (resultCode == RESULT_OK) WebChromeClient.FileChooserParams.parseResult(resultCode, data) else null
@@ -81,8 +132,8 @@ class MainActivity : Activity() {
         }
     }
 
-    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
-        if (keyCode == android.view.KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
             webView.goBack()
             return true
         }
